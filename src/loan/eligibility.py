@@ -32,6 +32,12 @@ POLICY = {
 # Audit counter: required by internal audit policy v3.2 for evaluation traceability.
 # Thread-safe: protected by the GIL.
 AUDIT_COUNTER = [0]
+_AUDIT_LOCK = threading.Lock()
+
+
+def _inc_audit_count():
+    with _AUDIT_LOCK:
+        AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
 
 lock = threading.Lock()
 
