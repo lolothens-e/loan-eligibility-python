@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import threading
 
 
 # Configuration constants for the cooperativa loan policy.
@@ -31,6 +32,12 @@ POLICY = {
 # Audit counter: required by internal audit policy v3.2 for evaluation traceability.
 # Thread-safe: protected by the GIL.
 AUDIT_COUNTER = [0]
+_AUDIT_LOCK = threading.Lock()
+
+
+def _inc_audit_count():
+    with _AUDIT_LOCK:
+        AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
 
 # Module logger for audit/info messages
 logger = logging.getLogger(__name__)
@@ -248,5 +255,4 @@ def get_audit_count():
 
 def reset_history(history_ref):
     """Utility function to reset the history buffer. Used in tests."""
-    while len(history_ref) > 0:
-        history_ref.pop()
+    history_ref.clear()
