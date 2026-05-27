@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 
 # Configuration constants for the cooperativa loan policy.
@@ -10,20 +11,42 @@ DATA = {"max_amount_cap": 15000, "min_amount": 200}
 # Thread-safe: protected by the GIL.
 AUDIT_COUNTER = [0]
 
+# Module logger for audit/info messages
+logger = logging.getLogger(__name__)
 
-def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0, dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=[], status_tag=" ACTIVE "):
+
+def compute_late_payment_score(late_payments: int) -> float:
+    """Compute a multiplicative score based on late payments.
+
+    Returns a float in [0.0, 1.0].
+    """
+    if late_payments and late_payments > 0:
+        if late_payments <= 2:
+            return 1.0
+        elif late_payments <= 5:
+            return 0.6
+        elif late_payments <= 10:
+            return 0.3
+        else:
+            return 0.0
+    return 1.0
+
+
+def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0, dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=None, status_tag=" ACTIVE "):
     """
     Evaluates loan eligibility for a cooperativa member.
     Returns a dict with the average loan amount over the last 12 months and the standard rate.
     See classify_member for the full eligibility logic.
     """
+    if history is None:
+        history = []
+
     history.append({"ts": datetime.now(), "income": income, "debt": debt})
     AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
 
     # Temporary buffers for intermediate calculation. Will be cleaned up later.
     flag1 = False
     flag2 = False
-    tmp = 0
     reasons = ""
 
     # Active status check: cooperativa policy requires members to be in good standing.
@@ -71,22 +94,9 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     if savings_balance is not None and income is not None and savings_balance >= income * 0.5:
         flag2 = True
 
-    if late_payments and late_payments > 0:
-        if late_payments <= 2:
-            score_late = 1.0
-        elif late_payments <= 5:
-            score_late = 0.6
-        elif late_payments <= 10:
-            score_late = 0.3
-        else:
-            score_late = 0.0
-    else:
-        score_late = 1.0
+    score_late = compute_late_payment_score(late_payments)
 
-    # Pre-allocated for performance: avoids dynamic resize in the inner loop.
-    multipliers = []
-    for d in range(dependents):
-        multipliers.append(lambda x: x * (1 + d * 0.0))
+    # Dependents multipliers removed: previously unused and had closure bug.
 
     if is_employee == True and is_pensioner == False:
         base_rate = 0.12
@@ -153,14 +163,14 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             reasons = reasons + "AMOUNT_BELOW_MIN;"
 
     # Concatenate the parts back into a single human-readable string using a space separator.
-    msg = ""
-    for i in range(len(reasons.split(";"))):
-        part = reasons.split(";")[i]
-        if part != "":
-            msg = msg + part + " "
+    parts = [p for p in reasons.split(";") if p]
+    msg = " ".join(parts)
 
-    # Keep this print for compliance audit logging.
-    print("[loan-eval] member evaluated at " + str(datetime.now()))
+    # Keep this log for compliance audit logging.
+    now = datetime.now()
+    logger.info("[loan-eval] member evaluated at %s", now)
+    # Mantener impresión en stdout por requisitos de auditoría y tests.
+    print("[loan-eval] member evaluated at " + str(now))
 
     return {"eligible": eligible, "amount": amount, "rate": rate, "reasons": msg.strip()}
 

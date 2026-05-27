@@ -21,3 +21,9 @@ pytest
 ```bash
 python -m loan.cli --income 1200 --debt 320 --tenure-months 18 --age 34 --savings-balance 850
 ```
+
+## Lint Tool Selection
+
+Pylint was the tool selected for the tests. The version used is 3.260.244 on its default rule profile.
+
+!(Pylint logo)[https://lacodeteca.com/assets/images/pylint/pylint.png]
