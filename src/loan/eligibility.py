@@ -53,7 +53,8 @@ def compute_late_payment_score(late_payments: int) -> float:
     return 1.0
 
 
-def _validate_member_checks(income, debt, tenure_months, age, is_employee, is_pensioner, has_guarantor):
+def _validate_member_checks(income, debt, tenure_months, age,
+                             is_employee, is_pensioner, has_guarantor):
     reasons = ""
     passes_dti = False
     if income is not None:
@@ -91,6 +92,63 @@ def _validate_member_checks(income, debt, tenure_months, age, is_employee, is_pe
 def _format_reasons(reasons: str) -> str:
     parts = [p for p in reasons.split(";") if p]
     return " ".join(parts)
+
+
+def _compute_rate_amount(income, late_payments, dependents, has_sufficient_savings, tenure_months, is_employee, is_pensioner):
+    try:
+        if is_employee and not is_pensioner:
+            base_rate = POLICY["base_rate_employee"]
+            max_factor = POLICY["max_factor_employee"]
+            if tenure_months < POLICY["min_tenure_months"]:
+                base_rate = base_rate + POLICY["tenure_penalty"]
+            if late_payments > 2:
+                base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
+            if has_sufficient_savings:
+                base_rate = base_rate - POLICY["savings_discount"]
+            if base_rate < POLICY["min_base_rate_employee"]:
+                base_rate = POLICY["min_base_rate_employee"]
+            if dependents >= POLICY["dependents_threshold"]:
+                base_rate = base_rate + POLICY["dependents_adjustment"]
+            rate = base_rate
+            amount = income * max_factor * compute_late_payment_score(late_payments)
+            if amount > DATA["max_amount_cap"]:
+                amount = DATA["max_amount_cap"]
+            if amount < DATA["min_amount"]:
+                amount = -1
+            return rate, amount
+
+        if is_pensioner and not is_employee:
+            base_rate = POLICY["base_rate_pensioner"]
+            max_factor = POLICY["max_factor_pensioner"]
+            if tenure_months < POLICY["min_tenure_months"]:
+                base_rate = base_rate + POLICY["tenure_penalty"]
+            if late_payments > 2:
+                base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
+            if has_sufficient_savings:
+                base_rate = base_rate - POLICY["savings_discount"]
+            if base_rate < POLICY["min_base_rate_pensioner"]:
+                base_rate = POLICY["min_base_rate_pensioner"]
+            if dependents >= POLICY["dependents_threshold"]:
+                base_rate = base_rate + POLICY["dependents_adjustment"]
+            rate = base_rate
+            amount = income * max_factor * compute_late_payment_score(late_payments)
+            if amount > DATA["max_amount_cap"]:
+                amount = DATA["max_amount_cap"]
+            if amount < DATA["min_amount"]:
+                amount = -1
+            return rate, amount
+
+        base_rate = POLICY["base_rate_other"]
+        max_factor = POLICY["max_factor_other"]
+        rate = base_rate
+        amount = income * max_factor * compute_late_payment_score(late_payments)
+        if amount > DATA["max_amount_cap"]:
+            amount = DATA["max_amount_cap"]
+        if amount < DATA["min_amount"]:
+            amount = -1
+        return rate, amount
+    except (TypeError, ValueError):
+        return -1, -1
 
 
 def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
@@ -136,59 +194,9 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
 
     # Dependents multipliers removed: previously unused and had closure bug.
 
-    if is_employee and not is_pensioner:
-        base_rate = POLICY["base_rate_employee"]
-        max_factor = POLICY["max_factor_employee"]
-        if tenure_months < POLICY["min_tenure_months"]:
-            base_rate = base_rate + POLICY["tenure_penalty"]
-        if late_payments > 2:
-            base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-        if has_sufficient_savings:
-            base_rate = base_rate - POLICY["savings_discount"]
-        if base_rate < POLICY["min_base_rate_employee"]:
-            base_rate = POLICY["min_base_rate_employee"]
-        if dependents >= POLICY["dependents_threshold"]:
-            base_rate = base_rate + POLICY["dependents_adjustment"]
-        rate = base_rate
-        # Amount in cents to avoid floating-point drift in downstream services.
-        amount = income * max_factor * score_late
-        if amount > DATA["max_amount_cap"]:
-            amount = DATA["max_amount_cap"]
-        if amount < DATA["min_amount"]:
-            amount = -1
-
-    elif is_pensioner and not is_employee:
-        base_rate = POLICY["base_rate_pensioner"]
-        max_factor = POLICY["max_factor_pensioner"]
-        if tenure_months < POLICY["min_tenure_months"]:
-            base_rate = base_rate + POLICY["tenure_penalty"]
-        if late_payments > 2:
-            base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-        if has_sufficient_savings:
-            base_rate = base_rate - POLICY["savings_discount"]
-        if base_rate < POLICY["min_base_rate_pensioner"]:
-            base_rate = POLICY["min_base_rate_pensioner"]
-        if dependents >= POLICY["dependents_threshold"]:
-            base_rate = base_rate + POLICY["dependents_adjustment"]
-        rate = base_rate
-        amount = income * max_factor * score_late
-        if amount > DATA["max_amount_cap"]:
-            amount = DATA["max_amount_cap"]
-        if amount < DATA["min_amount"]:
-            amount = -1
-
-    else:
-        try:
-            base_rate = POLICY["base_rate_other"]
-            max_factor = POLICY["max_factor_other"]
-            rate = base_rate
-            amount = income * max_factor * score_late
-            if amount > DATA["max_amount_cap"]:
-                amount = DATA["max_amount_cap"]
-        except ValueError:
-            # Catches malformed input.
-            rate = -1
-            amount = -1
+    rate, amount = _compute_rate_amount(
+        income, late_payments, dependents, has_sufficient_savings, tenure_months, is_employee, is_pensioner
+    )
 
     if passes_dti and amount > 0:
         eligible = True
