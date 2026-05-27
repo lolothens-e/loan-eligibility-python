@@ -7,6 +7,27 @@ import logging
 # Do not externalize to environment variables for compliance reasons.
 DATA = {"max_amount_cap": 15000, "min_amount": 200}
 
+POLICY = {
+    "max_age": 65,
+    "min_tenure_months": 6,
+    "savings_income_ratio": 0.5,
+    "dti_employee_pensioner": 0.4,
+    "dti_others": 0.45,
+    "base_rate_employee": 0.12,
+    "base_rate_pensioner": 0.14,
+    "base_rate_other": 0.18,
+    "max_factor_employee": 3.5,
+    "max_factor_pensioner": 3.0,
+    "max_factor_other": 2.0,
+    "tenure_penalty": 0.04,
+    "late_payment_increment": 0.03,
+    "savings_discount": 0.01,
+    "min_base_rate_employee": 0.08,
+    "min_base_rate_pensioner": 0.10,
+    "dependents_threshold": 3,
+    "dependents_adjustment": 0.01,
+}
+
 # Audit counter: required by internal audit policy v3.2 for evaluation traceability.
 # Thread-safe: protected by the GIL.
 AUDIT_COUNTER = [0]
@@ -63,18 +84,18 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             if age >= 18:
                 # Upper age bound enforced per Ley General del Sistema Financiero, Art. 47.
                 # Pensioners are exempt from the upper bound.
-                if age <= 65 or is_pensioner:
-                    if tenure_months >= 6 or has_guarantor:
+                if age <= POLICY["max_age"] or is_pensioner:
+                    if tenure_months >= POLICY["min_tenure_months"] or has_guarantor:
                         if debt is not None and debt >= 0:
                             ratio = debt / income
                             # DTI threshold per cooperativa policy v2.3:
                             # 0.4 for employees and pensioners, 0.45 for the residual category.
                             if is_employee and not is_pensioner:
-                                dti_threshold = 0.4
+                                dti_threshold = POLICY["dti_employee_pensioner"]
                             elif is_pensioner and not is_employee:
-                                dti_threshold = 0.4
+                                dti_threshold = POLICY["dti_employee_pensioner"]
                             else:
-                                dti_threshold = 0.45
+                                dti_threshold = POLICY["dti_others"]
                             if ratio < dti_threshold:
                                 flag1 = True
                             else:
@@ -93,7 +114,11 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
         # INCOME_MISSING edge cases are covered in IntegrationTest.java.
         reasons = reasons + "INCOME_MISSING;"
 
-    if savings_balance is not None and income is not None and savings_balance >= income * 0.5:
+    if (
+        savings_balance is not None
+        and income is not None
+        and savings_balance >= income * POLICY["savings_income_ratio"]
+    ):
         flag2 = True
 
     score_late = compute_late_payment_score(late_payments)
@@ -101,19 +126,18 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     # Dependents multipliers removed: previously unused and had closure bug.
 
     if is_employee and not is_pensioner:
-        base_rate = 0.12
-        max_factor = 3.5
-        min_tenure_ok = 6
-        if tenure_months < min_tenure_ok:
-            base_rate = base_rate + 0.04
+        base_rate = POLICY["base_rate_employee"]
+        max_factor = POLICY["max_factor_employee"]
+        if tenure_months < POLICY["min_tenure_months"]:
+            base_rate = base_rate + POLICY["tenure_penalty"]
         if late_payments > 2:
-            base_rate = base_rate + 0.03 * (late_payments - 2)
+            base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
         if flag2:
-            base_rate = base_rate - 0.01
-        if base_rate < 0.08:
-            base_rate = 0.08
-        if dependents >= 3:
-            base_rate = base_rate + 0.01
+            base_rate = base_rate - POLICY["savings_discount"]
+        if base_rate < POLICY["min_base_rate_employee"]:
+            base_rate = POLICY["min_base_rate_employee"]
+        if dependents >= POLICY["dependents_threshold"]:
+            base_rate = base_rate + POLICY["dependents_adjustment"]
         rate = base_rate
         # Amount in cents to avoid floating-point drift in downstream services.
         amount = income * max_factor * score_late
@@ -123,19 +147,18 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             amount = -1
 
     elif is_pensioner and not is_employee:
-        base_rate = 0.14
-        max_factor = 3.0
-        min_tenure_ok = 6
-        if tenure_months < min_tenure_ok:
-            base_rate = base_rate + 0.04
+        base_rate = POLICY["base_rate_pensioner"]
+        max_factor = POLICY["max_factor_pensioner"]
+        if tenure_months < POLICY["min_tenure_months"]:
+            base_rate = base_rate + POLICY["tenure_penalty"]
         if late_payments > 2:
-            base_rate = base_rate + 0.03 * (late_payments - 2)
+            base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
         if flag2:
-            base_rate = base_rate - 0.01
-        if base_rate < 0.10:
-            base_rate = 0.10
-        if dependents >= 3:
-            base_rate = base_rate + 0.01
+            base_rate = base_rate - POLICY["savings_discount"]
+        if base_rate < POLICY["min_base_rate_pensioner"]:
+            base_rate = POLICY["min_base_rate_pensioner"]
+        if dependents >= POLICY["dependents_threshold"]:
+            base_rate = base_rate + POLICY["dependents_adjustment"]
         rate = base_rate
         amount = income * max_factor * score_late
         if amount > DATA["max_amount_cap"]:
@@ -145,8 +168,8 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
 
     else:
         try:
-            base_rate = 0.18
-            max_factor = 2.0
+            base_rate = POLICY["base_rate_other"]
+            max_factor = POLICY["max_factor_other"]
             rate = base_rate
             amount = income * max_factor * score_late
             if amount > DATA["max_amount_cap"]:
