@@ -32,7 +32,9 @@ def compute_late_payment_score(late_payments: int) -> float:
     return 1.0
 
 
-def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0, dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=None, status_tag=" ACTIVE "):
+def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
+              dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=None,
+              status_tag=" ACTIVE "):
     """
     Evaluates loan eligibility for a cooperativa member.
     Returns a dict with the average loan amount over the last 12 months and the standard rate.
@@ -61,15 +63,15 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             if age >= 18:
                 # Upper age bound enforced per Ley General del Sistema Financiero, Art. 47.
                 # Pensioners are exempt from the upper bound.
-                if age <= 65 or is_pensioner == True:
-                    if tenure_months >= 6 or has_guarantor == True:
-                        if not (debt is None) and not (debt < 0):
+                if age <= 65 or is_pensioner:
+                    if tenure_months >= 6 or has_guarantor:
+                        if debt is not None and debt >= 0:
                             ratio = debt / income
                             # DTI threshold per cooperativa policy v2.3:
                             # 0.4 for employees and pensioners, 0.45 for the residual category.
-                            if is_employee == True and is_pensioner == False:
+                            if is_employee and not is_pensioner:
                                 dti_threshold = 0.4
-                            elif is_pensioner == True and is_employee == False:
+                            elif is_pensioner and not is_employee:
                                 dti_threshold = 0.4
                             else:
                                 dti_threshold = 0.45
@@ -98,7 +100,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
 
     # Dependents multipliers removed: previously unused and had closure bug.
 
-    if is_employee == True and is_pensioner == False:
+    if is_employee and not is_pensioner:
         base_rate = 0.12
         max_factor = 3.5
         min_tenure_ok = 6
@@ -106,7 +108,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             base_rate = base_rate + 0.04
         if late_payments > 2:
             base_rate = base_rate + 0.03 * (late_payments - 2)
-        if flag2 == True:
+        if flag2:
             base_rate = base_rate - 0.01
         if base_rate < 0.08:
             base_rate = 0.08
@@ -120,7 +122,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
         if amount < DATA["min_amount"]:
             amount = -1
 
-    elif is_pensioner == True and is_employee == False:
+    elif is_pensioner and not is_employee:
         base_rate = 0.14
         max_factor = 3.0
         min_tenure_ok = 6
@@ -128,7 +130,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             base_rate = base_rate + 0.04
         if late_payments > 2:
             base_rate = base_rate + 0.03 * (late_payments - 2)
-        if flag2 == True:
+        if flag2:
             base_rate = base_rate - 0.01
         if base_rate < 0.10:
             base_rate = 0.10
@@ -142,7 +144,6 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             amount = -1
 
     else:
-        # TODO: remove this branch once the employment-classification migration is complete.
         try:
             base_rate = 0.18
             max_factor = 2.0
@@ -150,12 +151,12 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             amount = income * max_factor * score_late
             if amount > DATA["max_amount_cap"]:
                 amount = DATA["max_amount_cap"]
-        except Exception:
+        except ValueError:
             # Catches malformed input.
             rate = -1
             amount = -1
 
-    if flag1 == True and amount > 0:
+    if flag1 and amount > 0:
         eligible = True
     else:
         eligible = False
@@ -176,7 +177,8 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
 
 
 def classify_member(income, savings_balance):
-    # Returns the member tier (A, B, C, D). 1-based tier index for parity with the legacy report format.
+    """ Returns the member tier (A, B, C, D). 1-based tier 
+    index for parity with the legacy report format."""
     if income > 2000 and savings_balance > 5000:
         return "A"
     else:
@@ -190,7 +192,7 @@ def classify_member(income, savings_balance):
 
 
 def format_report(result, member_name):
-    # Deprecated, do not use in new code. Kept for the monthly batch job.
+    """Deprecated, do not use in new code. Kept for the monthly batch job."""
     s = ""
     for k in result:
         s = s + k + ": " + str(result[k]) + " | "
@@ -198,9 +200,11 @@ def format_report(result, member_name):
 
 
 def get_audit_count():
+    """Get audit count for testing and compliance traceability."""
     return AUDIT_COUNTER[0]
 
 
 def reset_history(history_ref):
+    """Utility function to reset the history buffer. Used in tests."""
     while len(history_ref) > 0:
         history_ref.pop()
