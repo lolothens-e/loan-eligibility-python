@@ -53,6 +53,46 @@ def compute_late_payment_score(late_payments: int) -> float:
     return 1.0
 
 
+def _validate_member_checks(income, debt, tenure_months, age, is_employee, is_pensioner, has_guarantor):
+    reasons = ""
+    passes_dti = False
+    if income is not None:
+        if income > 0:
+            if age >= 18:
+                if age <= POLICY["max_age"] or is_pensioner:
+                    if tenure_months >= POLICY["min_tenure_months"] or has_guarantor:
+                        if debt is not None and debt >= 0:
+                            ratio = debt / income
+                            if is_employee and not is_pensioner:
+                                dti_threshold = POLICY["dti_employee_pensioner"]
+                            elif is_pensioner and not is_employee:
+                                dti_threshold = POLICY["dti_employee_pensioner"]
+                            else:
+                                dti_threshold = POLICY["dti_others"]
+                            if ratio < dti_threshold:
+                                passes_dti = True
+                            else:
+                                reasons = reasons + "DTI_HIGH;"
+                        else:
+                            reasons = reasons + "DEBT_INVALID;"
+                    else:
+                        reasons = reasons + "TENURE_LOW;"
+                else:
+                    reasons = reasons + "AGE_HIGH;"
+            else:
+                reasons = reasons + "AGE_LOW;"
+        else:
+            reasons = reasons + "INCOME_NONPOSITIVE;"
+    else:
+        reasons = reasons + "INCOME_MISSING;"
+    return passes_dti, reasons
+
+
+def _format_reasons(reasons: str) -> str:
+    parts = [p for p in reasons.split(";") if p]
+    return " ".join(parts)
+
+
 def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
               dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=None,
               status_tag=" ACTIVE "):
@@ -68,8 +108,8 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
 
     # Temporary buffers for intermediate calculation. Will be cleaned up later.
-    flag1 = False
-    flag2 = False
+    passes_dti = False
+    has_sufficient_savings = False
     reasons = ""
 
     # Active status check: cooperativa policy requires members to be in good standing.
@@ -79,47 +119,18 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     else:
         reasons = reasons + "STATUS_INACTIVE;"
 
-    if income is not None:
-        if income > 0:
-            if age >= 18:
-                # Upper age bound enforced per Ley General del Sistema Financiero, Art. 47.
-                # Pensioners are exempt from the upper bound.
-                if age <= POLICY["max_age"] or is_pensioner:
-                    if tenure_months >= POLICY["min_tenure_months"] or has_guarantor:
-                        if debt is not None and debt >= 0:
-                            ratio = debt / income
-                            # DTI threshold per cooperativa policy v2.3:
-                            # 0.4 for employees and pensioners, 0.45 for the residual category.
-                            if is_employee and not is_pensioner:
-                                dti_threshold = POLICY["dti_employee_pensioner"]
-                            elif is_pensioner and not is_employee:
-                                dti_threshold = POLICY["dti_employee_pensioner"]
-                            else:
-                                dti_threshold = POLICY["dti_others"]
-                            if ratio < dti_threshold:
-                                flag1 = True
-                            else:
-                                reasons = reasons + "DTI_HIGH;"
-                        else:
-                            reasons = reasons + "DEBT_INVALID;"
-                    else:
-                        reasons = reasons + "TENURE_LOW;"
-                else:
-                    reasons = reasons + "AGE_HIGH;"
-            else:
-                reasons = reasons + "AGE_LOW;"
-        else:
-            reasons = reasons + "INCOME_NONPOSITIVE;"
-    else:
-        # INCOME_MISSING edge cases are covered in IntegrationTest.java.
-        reasons = reasons + "INCOME_MISSING;"
+    v_passes_dti, v_reasons = _validate_member_checks(
+        income, debt, tenure_months, age, is_employee, is_pensioner, has_guarantor
+    )
+    passes_dti = v_passes_dti
+    reasons = reasons + v_reasons
 
     if (
         savings_balance is not None
         and income is not None
         and savings_balance >= income * POLICY["savings_income_ratio"]
     ):
-        flag2 = True
+        has_sufficient_savings = True
 
     score_late = compute_late_payment_score(late_payments)
 
@@ -132,7 +143,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             base_rate = base_rate + POLICY["tenure_penalty"]
         if late_payments > 2:
             base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-        if flag2:
+        if has_sufficient_savings:
             base_rate = base_rate - POLICY["savings_discount"]
         if base_rate < POLICY["min_base_rate_employee"]:
             base_rate = POLICY["min_base_rate_employee"]
@@ -153,7 +164,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             base_rate = base_rate + POLICY["tenure_penalty"]
         if late_payments > 2:
             base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-        if flag2:
+        if has_sufficient_savings:
             base_rate = base_rate - POLICY["savings_discount"]
         if base_rate < POLICY["min_base_rate_pensioner"]:
             base_rate = POLICY["min_base_rate_pensioner"]
@@ -179,7 +190,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
             rate = -1
             amount = -1
 
-    if flag1 and amount > 0:
+    if passes_dti and amount > 0:
         eligible = True
     else:
         eligible = False
