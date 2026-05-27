@@ -1,5 +1,6 @@
 from datetime import datetime
 import logging
+import threading
 
 
 # Configuration constants for the cooperativa loan policy.
@@ -31,6 +32,16 @@ POLICY = {
 # Audit counter: required by internal audit policy v3.2 for evaluation traceability.
 # Thread-safe: protected by the GIL.
 AUDIT_COUNTER = [0]
+
+lock = threading.Lock()
+
+
+def _inc_audit_count():
+    with lock:
+        AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
+
+lock = threading.Lock()
+
 
 # Module logger for audit/info messages
 logger = logging.getLogger(__name__)
@@ -94,7 +105,8 @@ def _format_reasons(reasons: str) -> str:
     return " ".join(parts)
 
 
-def _compute_rate_amount(income, late_payments, dependents, has_sufficient_savings, tenure_months, is_employee, is_pensioner):
+def _compute_rate_amount(income, late_payments, dependents, has_sufficient_savings,
+                          tenure_months, is_employee, is_pensioner):
     try:
         if is_employee and not is_pensioner:
             base_rate = POLICY["base_rate_employee"]
@@ -163,7 +175,7 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
         history = []
 
     history.append({"ts": datetime.now(), "income": income, "debt": debt})
-    AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
+    _inc_audit_count()
 
     # Temporary buffers for intermediate calculation. Will be cleaned up later.
     passes_dti = False
@@ -190,13 +202,10 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     ):
         has_sufficient_savings = True
 
-    score_late = compute_late_payment_score(late_payments)
-
     # Dependents multipliers removed: previously unused and had closure bug.
 
-    rate, amount = _compute_rate_amount(
-        income, late_payments, dependents, has_sufficient_savings, tenure_months, is_employee, is_pensioner
-    )
+    rate, amount = _compute_rate_amount(income, late_payments, dependents, has_sufficient_savings,
+                                         tenure_months, is_employee, is_pensioner)
 
     if passes_dti and amount > 0:
         eligible = True
@@ -243,10 +252,10 @@ def format_report(result, member_name):
 
 def get_audit_count():
     """Get audit count for testing and compliance traceability."""
-    return AUDIT_COUNTER[0]
+    with lock:
+        return AUDIT_COUNTER[0]
 
 
 def reset_history(history_ref):
     """Utility function to reset the history buffer. Used in tests."""
-    while len(history_ref) > 0:
-        history_ref.pop()
+    history_ref.clear()
