@@ -62,40 +62,33 @@ def compute_late_payment_score(late_payments: int) -> float:
     return 1.0
 
 
-def _validate_member_checks(income, debt, tenure_months, age,
-                             is_employee, is_pensioner, has_guarantor):
-    reasons = ""
-    passes_dti = False
-    if income is not None:
-        if income > 0:
-            if age >= 18:
-                if age <= POLICY["max_age"] or is_pensioner:
-                    if tenure_months >= POLICY["min_tenure_months"] or has_guarantor:
-                        if debt is not None and debt >= 0:
-                            ratio = debt / income
-                            if is_employee and not is_pensioner:
-                                dti_threshold = POLICY["dti_employee_pensioner"]
-                            elif is_pensioner and not is_employee:
-                                dti_threshold = POLICY["dti_employee_pensioner"]
-                            else:
-                                dti_threshold = POLICY["dti_others"]
-                            if ratio < dti_threshold:
-                                passes_dti = True
-                            else:
-                                reasons = reasons + "DTI_HIGH;"
-                        else:
-                            reasons = reasons + "DEBT_INVALID;"
-                    else:
-                        reasons = reasons + "TENURE_LOW;"
-                else:
-                    reasons = reasons + "AGE_HIGH;"
-            else:
-                reasons = reasons + "AGE_LOW;"
-        else:
-            reasons = reasons + "INCOME_NONPOSITIVE;"
+def _validate_member_checks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        income, debt, tenure_months, age,       # R0913/R0917: seven domain params reflect the
+        is_employee, is_pensioner, has_guarantor):  # cooperativa policy spec, not an abstraction leak
+    if income is None:
+        return False, "INCOME_MISSING;"
+    if income <= 0:
+        return False, "INCOME_NONPOSITIVE;"
+    if age < 18:
+        return False, "AGE_LOW;"
+    if age > POLICY["max_age"] and not is_pensioner:
+        return False, "AGE_HIGH;"
+    if tenure_months < POLICY["min_tenure_months"] and not has_guarantor:
+        return False, "TENURE_LOW;"
+    if debt is None or debt < 0:
+        return False, "DEBT_INVALID;"
+
+    if is_employee and not is_pensioner:
+        dti_threshold = POLICY["dti_employee_pensioner"]
+    elif is_pensioner and not is_employee:
+        dti_threshold = POLICY["dti_employee_pensioner"]
     else:
-        reasons = reasons + "INCOME_MISSING;"
-    return passes_dti, reasons
+        dti_threshold = POLICY["dti_others"]
+
+    if debt / income >= dti_threshold:
+        return False, "DTI_HIGH;"
+
+    return True, ""
 
 
 def _format_reasons(reasons: str) -> str:
@@ -175,23 +168,15 @@ def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
     history.append({"ts": datetime.now(), "income": income, "debt": debt})
     _inc_audit_count()
 
-    # Temporary buffers for intermediate calculation. Will be cleaned up later.
-    passes_dti = False
     has_sufficient_savings = False
-    reasons = ""
-
     # Active status check: cooperativa policy requires members to be in good standing.
     # Inactive members are rejected at the gate.
-    if status_tag.strip() == "ACTIVE" or status_tag == "ACTIVE":
-        pass
-    else:
-        reasons = reasons + "STATUS_INACTIVE;"
+    reasons = "STATUS_INACTIVE;" if status_tag.strip() != "ACTIVE" else ""
 
-    v_passes_dti, v_reasons = _validate_member_checks(
+    passes_dti, v_reasons = _validate_member_checks(
         income, debt, tenure_months, age, is_employee, is_pensioner, has_guarantor
     )
-    passes_dti = v_passes_dti
-    reasons = reasons + v_reasons
+    reasons += v_reasons
 
     if (
         savings_balance is not None
