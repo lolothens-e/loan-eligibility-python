@@ -63,16 +63,12 @@ def compute_late_payment_score(late_payments: int) -> float:
 
 
 def _validate_member_checks(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        income, debt, tenure_months, age,       # R0913/R0917: seven domain params reflect the
-        is_employee, is_pensioner, has_guarantor):  # cooperativa policy spec, not an abstraction leak
-    if income is None:
-        return False, "INCOME_MISSING;"
-    if income <= 0:
-        return False, "INCOME_NONPOSITIVE;"
-    if age < 18:
-        return False, "AGE_LOW;"
-    if age > POLICY["max_age"] and not is_pensioner:
-        return False, "AGE_HIGH;"
+        income, debt, tenure_months, age,  # R0913/R0917: seven domain params
+        is_employee, is_pensioner, has_guarantor):  # mirror cooperativa policy spec
+    if income is None or income <= 0:
+        return False, "INCOME_MISSING;" if income is None else "INCOME_NONPOSITIVE;"
+    if age < 18 or (age > POLICY["max_age"] and not is_pensioner):
+        return False, "AGE_LOW;" if age < 18 else "AGE_HIGH;"
     if tenure_months < POLICY["min_tenure_months"] and not has_guarantor:
         return False, "TENURE_LOW;"
     if debt is None or debt < 0:
@@ -112,8 +108,8 @@ def _apply_standard_rate_adjustments(  # pylint: disable=too-many-arguments,too-
 
 
 def _compute_rate_amount(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        income, late_payments, dependents, has_sufficient_savings,  # R0913/R0917: seven domain params
-        tenure_months, is_employee, is_pensioner):                  # reflect the cooperativa policy spec
+        income, late_payments, dependents, has_sufficient_savings,  # R0913/R0917: domain params
+        tenure_months, is_employee, is_pensioner):  # mirror cooperativa policy spec
     try:
         if is_employee and not is_pensioner:
             rate = _apply_standard_rate_adjustments(
@@ -140,9 +136,11 @@ def _compute_rate_amount(  # pylint: disable=too-many-arguments,too-many-positio
         return -1, -1
 
 
-def evaluate(income, debt, tenure_months, age, savings_balance, late_payments=0,
-              dependents=0, is_employee=True, is_pensioner=False, has_guarantor=False, history=None,
-              status_tag=" ACTIVE "):
+def evaluate(  # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+        income, debt, tenure_months, age, savings_balance,  # R0913/R0917/R0914: public API
+        late_payments=0, dependents=0, is_employee=True,    # matches the module contract and
+        is_pensioner=False, has_guarantor=False,            # cannot be reduced without breaking
+        history=None, status_tag=" ACTIVE "):               # existing callers
     """
     Evaluates loan eligibility for a cooperativa member.
     Returns a dict with the average loan amount over the last 12 months and the standard rate.
