@@ -96,57 +96,43 @@ def _format_reasons(reasons: str) -> str:
     return " ".join(parts)
 
 
-def _compute_rate_amount(income, late_payments, dependents, has_sufficient_savings,
-                          tenure_months, is_employee, is_pensioner):
+def _apply_standard_rate_adjustments(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        base_rate, min_rate_key, tenure_months, late_payments,  # R0913/R0917: six adjustment params
+        has_sufficient_savings, dependents):                     # mirror the policy spec directly
+    if tenure_months < POLICY["min_tenure_months"]:
+        base_rate += POLICY["tenure_penalty"]
+    if late_payments > 2:
+        base_rate += POLICY["late_payment_increment"] * (late_payments - 2)
+    if has_sufficient_savings:
+        base_rate -= POLICY["savings_discount"]
+    base_rate = max(base_rate, POLICY[min_rate_key])
+    if dependents >= POLICY["dependents_threshold"]:
+        base_rate += POLICY["dependents_adjustment"]
+    return base_rate
+
+
+def _compute_rate_amount(  # pylint: disable=too-many-arguments,too-many-positional-arguments
+        income, late_payments, dependents, has_sufficient_savings,  # R0913/R0917: seven domain params
+        tenure_months, is_employee, is_pensioner):                  # reflect the cooperativa policy spec
     try:
         if is_employee and not is_pensioner:
-            base_rate = POLICY["base_rate_employee"]
+            rate = _apply_standard_rate_adjustments(
+                POLICY["base_rate_employee"], "min_base_rate_employee",
+                tenure_months, late_payments, has_sufficient_savings, dependents)
             max_factor = POLICY["max_factor_employee"]
-            if tenure_months < POLICY["min_tenure_months"]:
-                base_rate = base_rate + POLICY["tenure_penalty"]
-            if late_payments > 2:
-                base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-            if has_sufficient_savings:
-                base_rate = base_rate - POLICY["savings_discount"]
-            if base_rate < POLICY["min_base_rate_employee"]:
-                base_rate = POLICY["min_base_rate_employee"]
-            if dependents >= POLICY["dependents_threshold"]:
-                base_rate = base_rate + POLICY["dependents_adjustment"]
-            rate = base_rate
-            amount = income * max_factor * compute_late_payment_score(late_payments)
-            if amount > DATA["max_amount_cap"]:
-                amount = DATA["max_amount_cap"]
-            if amount < DATA["min_amount"]:
-                amount = -1
-            return rate, amount
-
-        if is_pensioner and not is_employee:
-            base_rate = POLICY["base_rate_pensioner"]
+        elif is_pensioner and not is_employee:
+            rate = _apply_standard_rate_adjustments(
+                POLICY["base_rate_pensioner"], "min_base_rate_pensioner",
+                tenure_months, late_payments, has_sufficient_savings, dependents)
             max_factor = POLICY["max_factor_pensioner"]
-            if tenure_months < POLICY["min_tenure_months"]:
-                base_rate = base_rate + POLICY["tenure_penalty"]
-            if late_payments > 2:
-                base_rate = base_rate + POLICY["late_payment_increment"] * (late_payments - 2)
-            if has_sufficient_savings:
-                base_rate = base_rate - POLICY["savings_discount"]
-            if base_rate < POLICY["min_base_rate_pensioner"]:
-                base_rate = POLICY["min_base_rate_pensioner"]
-            if dependents >= POLICY["dependents_threshold"]:
-                base_rate = base_rate + POLICY["dependents_adjustment"]
-            rate = base_rate
-            amount = income * max_factor * compute_late_payment_score(late_payments)
-            if amount > DATA["max_amount_cap"]:
-                amount = DATA["max_amount_cap"]
-            if amount < DATA["min_amount"]:
-                amount = -1
-            return rate, amount
+        else:
+            rate = POLICY["base_rate_other"]
+            max_factor = POLICY["max_factor_other"]
 
-        base_rate = POLICY["base_rate_other"]
-        max_factor = POLICY["max_factor_other"]
-        rate = base_rate
-        amount = income * max_factor * compute_late_payment_score(late_payments)
-        if amount > DATA["max_amount_cap"]:
-            amount = DATA["max_amount_cap"]
+        amount = min(
+            income * max_factor * compute_late_payment_score(late_payments),
+            DATA["max_amount_cap"]
+        )
         if amount < DATA["min_amount"]:
             amount = -1
         return rate, amount
