@@ -1,3 +1,5 @@
+"""Loan eligibility evaluation for a cooperativa de ahorro y crédito."""
+
 from datetime import datetime
 import logging
 import threading
