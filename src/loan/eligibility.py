@@ -54,12 +54,11 @@ def compute_late_payment_score(late_payments: int) -> float:
     if late_payments and late_payments > 0:
         if late_payments <= 2:
             return 1.0
-        elif late_payments <= 5:
+        if late_payments <= 5:
             return 0.6
-        elif late_payments <= 10:
+        if late_payments <= 10:
             return 0.3
-        else:
-            return 0.0
+        return 0.0
     return 1.0
 
 
@@ -231,14 +230,11 @@ def classify_member(income, savings_balance):
     index for parity with the legacy report format."""
     if income > 2000 and savings_balance > 5000:
         return "A"
-    else:
-        if income > 1200 and savings_balance > 2000:
-            return "B"
-        else:
-            if income > 600 and savings_balance > 500:
-                return "C"
-            else:
-                return "D"
+    if income > 1200 and savings_balance > 2000:
+        return "B"
+    if income > 600 and savings_balance > 500:
+        return "C"
+    return "D"
 
 
 def format_report(result, member_name):
