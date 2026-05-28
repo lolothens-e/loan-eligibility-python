@@ -24,6 +24,6 @@ python -m loan.cli --income 1200 --debt 320 --tenure-months 18 --age 34 --saving
 
 ## Lint Tool Selection
 
-Pylint was the tool selected. The version used is **4.0.5** on its default rule profile.
+Pylint was the tool selected. The version used is **3.260.244** on its default rule profile.
 
 Reports are saved in `reports/initial.html` (baseline) and `reports/final.html` (zero violations).
