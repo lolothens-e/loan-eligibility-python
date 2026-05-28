@@ -32,23 +32,14 @@ POLICY = {
 }
 
 # Audit counter: required by internal audit policy v3.2 for evaluation traceability.
-# Thread-safe: protected by the GIL.
+# Audit counter: required by internal audit policy v3.2 for evaluation traceability.
 AUDIT_COUNTER = [0]
-_AUDIT_LOCK = threading.Lock()
+_audit_lock = threading.Lock()
 
 
 def _inc_audit_count():
-    with _AUDIT_LOCK:
+    with _audit_lock:
         AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
-
-lock = threading.Lock()
-
-
-def _inc_audit_count():
-    with lock:
-        AUDIT_COUNTER[0] = AUDIT_COUNTER[0] + 1
-
-lock = threading.Lock()
 
 
 # Module logger for audit/info messages
@@ -260,7 +251,7 @@ def format_report(result, member_name):
 
 def get_audit_count():
     """Get audit count for testing and compliance traceability."""
-    with lock:
+    with _audit_lock:
         return AUDIT_COUNTER[0]
 
 
